@@ -1,4 +1,4 @@
-#include <TimeLib.h>
+#include <RTClib.h>
 #include <Adafruit_NeoPixel.h>
 
 // Pins
@@ -9,6 +9,9 @@
 // Init the pixel strip
 int pixels = 72;
 Adafruit_NeoPixel strip = Adafruit_NeoPixel(pixels, PIN, NEO_GRBW + NEO_KHZ800);
+
+// Time
+RTC_DS3231 rtc;
 
 /*
  * A data structure to represent words.
@@ -37,8 +40,8 @@ singleWord numbers[12];
 /*
  * Letter colors.
  */
-uint32_t dayColor = strip.Color(255, 255, 255); //White
-uint32_t nightColor = strip.Color(0, 0, 255); //Blue
+uint32_t dayColor = strip.Color(255, 255, 255, 255); //White
+uint32_t nightColor = strip.Color(0, 155, 255); //Blue
 
 /*
  * Delays and pauses for buttons
@@ -53,8 +56,13 @@ unsigned long lastRun = 0;
 unsigned long pauseDuration = 10000;
 
 void setup() {
-  // Set the time to midnight
-  setTime(0,0,0,19,11,2017);
+  rtc.begin();
+  if (rtc.lostPower()) {
+    // This line sets the RTC with an explicit date & time
+    // Sets date to Jan 1st 2017 12.00
+    rtc.adjust(DateTime(2017, 1, 1, 12, 0, 0));
+  }
+ 
 
   // Init the number words
   numbers[0] = { 31, 33 };
@@ -70,7 +78,7 @@ void setup() {
   numbers[10] = { 61, 66 };
   numbers[11] = { 67, 71 };
   
-  //Serial.begin(9600);
+  Serial.begin(9600);
 
   // Start the strip
   strip.setBrightness(255);
@@ -84,6 +92,7 @@ void setup() {
 
 void loop() {
   long currentMs = millis();
+  DateTime now = rtc.now();
 
   // Adjust time if buttons are pressed
   if ((currentMs - lastTimeAdjustment) > buttonDelay) {
@@ -93,13 +102,17 @@ void loop() {
     if (hourButtonPress == HIGH) {
       //Serial.print("Hour button pressed ");
       //Serial.println(hourButtonPress);
-      adjustTime(60 * 60);
+      TimeSpan oneHour = TimeSpan(60 * 60);
+      DateTime later = now + oneHour;
+      rtc.adjust(later);
       lastTimeAdjustment = currentMs;
       lastRun = currentMs; // Trigger a redraw
     } else if (minuteButtonPress == HIGH) {
       //Serial.print("Minute button pressed ");
       //Serial.println(minuteButtonPress);
-      adjustTime(60 * 5);
+      TimeSpan fiveMinutes = TimeSpan(60 * 5);
+      DateTime later = now + fiveMinutes;
+      rtc.adjust(later);
       lastTimeAdjustment = currentMs;
       lastRun = currentMs; // Trigger a redraw
     }
@@ -116,11 +129,11 @@ void loop() {
   // Turn off all letters
   blank();
 
-  int hours = hourFormat12();
+  uint8_t hours = now.hour() % 12;
   //Serial.print("hour time is ");
   //Serial.println(hours);
 
-  int minutes = minute();
+  uint8_t minutes = now.minute();
   singleWord hourWord = minutesToHours(hours, minutes);
   singleWord minuteWord = minutesToWords(minutes);
   singleWord positionWord = minutesToPosition(minutes);
@@ -128,7 +141,7 @@ void loop() {
 
   //debugWords(hourWord, minuteWord, positionWord);
   
-  uint32_t color = colorFromTime();
+  uint32_t color = colorFromTime(hours);
 
   displayWord(klokken_er, color);
   displayWord(hourWord, color);
@@ -152,7 +165,7 @@ void displayWord(singleWord w, uint32_t color) {
 /*
  * Get hour word based on current hours and minutes.
  */
-singleWord minutesToHours(int hours, int minutes) {
+singleWord minutesToHours(uint8_t hours, uint8_t minutes) {
   if (minutes <= 17) {
     return numbers[hours-1];
   }
@@ -165,8 +178,7 @@ singleWord minutesToHours(int hours, int minutes) {
 /*
  * Get minute word based on current minutes
  */
-singleWord minutesToWords(int minutes) {
-  Serial.print("minutes ");
+singleWord minutesToWords(uint8_t minutes) {
   if (minutes < 3) {
     Serial.println(minutes);
     return hel;
@@ -187,7 +199,7 @@ singleWord minutesToWords(int minutes) {
     return fem;
   } else if (minutes < 43) {
     return ti;
-  } else if (minutes < 47) {
+  } else if (minutes < 48) {
     return kvart;
   } else if (minutes < 53) {
     return ti;
@@ -202,8 +214,8 @@ singleWord minutesToWords(int minutes) {
 /*
  * Get "over"/"på" words based on minutes
  */
-singleWord minutesToPosition(int minutes) {
-  if (3 < minutes && minutes <= 17) {
+singleWord minutesToPosition(uint8_t minutes) {
+  if (3 <= minutes && minutes <= 17) {
     return over;
   } else if (17 < minutes && minutes <= 27) {
     return paa_1;
@@ -211,7 +223,7 @@ singleWord minutesToPosition(int minutes) {
     return over;
   } else if (43 < minutes && minutes <= 47) {
     return paa_2;
-  } else if (47 < minutes && minutes <= 57) {
+  } else if (47 < minutes && minutes < 57) {
     return paa_1;
   }
   return hel;
@@ -220,7 +232,7 @@ singleWord minutesToPosition(int minutes) {
 /*
  * Get "halv" or "hel" (nothing) from minutes
  */
-singleWord halfOrWhole(int minutes) {
+singleWord halfOrWhole(uint8_t minutes) {
   if (17 < minutes && minutes <= 37) {
     return halv;
   }
@@ -233,8 +245,7 @@ singleWord halfOrWhole(int minutes) {
  * This will return white from 06:00 to 18:00
  * and blue the rest of the time.
  */
-uint32_t colorFromTime() {
-  int h = hour();
+uint32_t colorFromTime(uint8_t h) {
   if (6 <= h && h < 18) {
     return dayColor;
   }
